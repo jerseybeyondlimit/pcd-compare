@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>PointCloud Difference Visualization</title>
+
+    <link rel="stylesheet" type="text/css" href="./build/potree/potree.css">
+<!--    <link rel="stylesheet" type="text/css" href="https://static.yourdomain.com/potree/build/resource/other/OrbitControls.css">-->
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<!--    <script src="https://static.yourdomain.com/potree/build/resource/libs/three/three.js"></script>-->
+    <script src="./libs/three.js/build/three.js"></script>
+<!--    <script src="https://static.yourdomain.com/potree/build/potree.js"></script>-->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.7.5/proj4.js"></script>
+    <script src="./build/potree/potree.js"></script>
+
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #potree_container {
+            position: absolute;
+            top: 50px;     /* 留出上传表单区域 */
+            left: 0; right: 0; bottom: 0;
+        }
+        #upload_panel {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 50px;
+            background: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            padding: 5px 10px;
+            z-index: 10;
+        }
+        #upload_panel input[type=file] {
+            margin-right: 10px;
+        }
+        #upload_panel button {
+            padding: 5px 12px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 上传与 Compare 按钮面板 -->
+    <div id="upload_panel">
+        <label>Base (PCD):
+            <input type="file" id="base_file" accept=".pcd" />
+        </label>
+        <label>Gen (PCD):
+            <input type="file" id="gen_file" accept=".pcd" />
+        </label>
+        <button id="btn_compare">Compare</button>
+        <span id="status" style="margin-left:20px;color:#555"></span>
+    </div>
+
+    <!-- Potree 渲染容器 -->
+    <div id="potree_container"></div>
+
+    <script>
+    // ---------- 全局变量 ----------
+    let viewer = null;
+    let cloudNodes = [];   // 用来存储当前加载的 PointCloudNodes（方便后面移除）
+    const API_COMPARE = "http://0.0.0.0:9000/compare";
+    // ↑ 请替换成你实际部署的 FastAPI URL
+
+    // ---------- 初始化 Potree ----------
+    function initPotree() {
+        viewer = new Potree.Viewer(document.getElementById("potree_container"));
+        viewer.setEDLEnabled(true);
+        viewer.setFOV(60);
+        viewer.setPointBudget(2_000_000);
+        viewer.loadSettingsFromURL();
+        viewer.setBackground("gradient");
+        viewer.setDescription("PointCloud Difference Viewer");
+
+        // 相机初始化位置
+        viewer.scene.view.position.set(0, 0, 50);
+        viewer.scene.view.lookAt(new THREE.Vector3(0, 0, 0));
+    }
+
+    // ---------- 清空场景中已有的点云 ----------
+    function clearPotreeScene() {
+        if (cloudNodes.length > 0) {
+            for (const node of cloudNodes) {
+                viewer.scene.removePointCloud(node);
+            }
+        }
+        cloudNodes = [];
+    }
+
+    // ---------- 根据后端返回的 URL 列表，在 Potree 中加载 PLY ----------
+    function loadAllPointClouds(urls) {
+        // urls: { base_url, gen_url, extra_base_url, extra_gen_url }
+        // 定义每组的显示参数
+        const configs = [
+            { url: urls.base_url,      name: "Base",        color: [0.8, 0.8, 0.8] },
+            { url: urls.gen_url,       name: "Gen",         color: [0.6, 0.6, 0.6] },
+            { url: urls.extra_base_url, name: "ExtraBase",  color: [1.0, 0.0, 0.0] },
+            { url: urls.extra_gen_url,  name: "ExtraGen",   color: [0.0, 0.0, 1.0] },
+        ];
+
+        // 按顺序异步加载
+        configs.forEach(cfg => {
+            Potree.loadPointCloud(cfg.url, cfg.name, e => {
+                let pointcloud = e.pointcloud;
+                // 全局给每组设一个统一颜色
+                pointcloud.material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+                pointcloud.material.size = 1.0;
+                pointcloud.material.shape = Potree.PointShape.SQUARE;
+                pointcloud.material.activeAttributeName = "rgba";
+                pointcloud.material.pointColorType = Potree.PointColorType.RGB;
+                pointcloud.material.uniforms.color.value.set(cfg.color[0], cfg.color[1], cfg.color[2]);
+                pointcloud.material.needsUpdate = true;
+
+                viewer.scene.addPointCloud(pointcloud);
+                cloudNodes.push(pointcloud);
+
+                // 加载完最后一个后，让相机自动缩放到点云范围
+                if (cfg.name === "ExtraGen") {
+                    viewer.fitToScreen();
+                }
+            });
+        });
+    }
+
+    // ---------- 监听 Compare 按钮点击事件 ----------
+    document.getElementById("btn_compare").addEventListener("click", async () => {
+        const baseInp = document.getElementById("base_file");
+        const genInp  = document.getElementById("gen_file");
+        const status  = document.getElementById("status");
+
+        if (!baseInp.files.length || !genInp.files.length) {
+            alert("请先选择 Base 和 Gen 两个 PCD 文件！");
+            return;
+        }
+
+        status.innerText = "正在上传并比较，请稍候…";
+        const formData = new FormData();
+        formData.append("base_pcd", baseInp.files[0]);
+        formData.append("gen_pcd",  genInp.files[0]);
+        // formData.append("epsilon", 0.02);  // 可选
+
+        try {
+            const resp = await fetch(API_COMPARE, {
+                method: "POST",
+                body: formData
+            });
+            if (!resp.ok) {
+                throw new Error(`服务器返回 ${resp.status}`);
+            }
+            const result = await resp.json();
+            /*
+              result = {
+                base_url: "/static/processed/base_<uuid>.ply",
+                gen_url: "/static/processed/gen_<uuid>.ply",
+                extra_base_url: "/static/processed/extra_base_<uuid>.ply",
+                extra_gen_url: "/static/processed/extra_gen_<uuid>.ply"
+              }
+            */
+            // 清空旧的
+            clearPotreeScene();
+            // 拼完整的外网可访问 URL：假设后端部署在 https://your-backend-domain.com
+            const prefix = "https://your-backend-domain.com";
+            loadAllPointClouds({
+                base_url:       prefix + result.base_url,
+                gen_url:        prefix + result.gen_url,
+                extra_base_url: prefix + result.extra_base_url,
+                extra_gen_url:  prefix + result.extra_gen_url
+            });
+
+            status.innerText = "渲染完成，可交互浏览。";
+        }
+        catch (err) {
+            console.error(err);
+            status.innerText = "操作失败，请检查控制台或稍后重试。";
+        }
+    });
+
+    // 页面加载完成后，立即初始化 Potree
+    window.addEventListener("load", () => {
+        initPotree();
+    });
+    </script>
+</body>
+</html>
