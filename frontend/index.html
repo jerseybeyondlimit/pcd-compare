@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>PointCloud Difference Visualization</title>
+
+    <link rel="stylesheet" type="text/css" href="./build/potree/potree.css">
+    <link rel="stylesheet" type="text/css" href="./libs/jquery-ui/jquery-ui.min.css">
+    <!-- <link rel="stylesheet" type="text/css" href="path/to/perfect-scrollbar.css"> -->
+    <link rel="stylesheet" type="text/css" href="./libs/openlayers3/ol.css"><!-- Map Plug-in -->
+    <link rel="stylesheet" type="text/css" href="./libs/spectrum/spectrum.css"><!-- Color Selector -->
+    
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- <script src="./libs/jquery-ui/jquery-ui.min.js"></script> -->
+    <!-- <script src="./libs/openlayers3/ol.js"></script> -->
+    <!-- <script src="./libs/spectrum/spectrum.js"></script> -->
+    <script src="./libs/three.js/build/three.js"></script>
+    <script src="./libs/other/BinaryHeap.js"></script>
+    <script src="./libs/tween/Tween.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.7.5/proj4.js"></script>
+    <script src="./build/potree/potree.js"></script>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #potree_container {
+            position: absolute;
+            top: 50px;
+            left: 0; right: 0; bottom: 0;
+            display: flex;
+            flex-direction: row;
+        }
+        #upload_panel {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 50px;
+            background: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            padding: 5px 10px;
+            z-index: 10;
+        }
+        #upload_panel input[type=file] {
+            margin-right: 10px;
+        }
+        #upload_panel button {
+            padding: 5px 12px;
+            cursor: pointer;
+        }
+        #potree_sidebar_container {
+            width: 350px;
+            max-width: 480px;
+            min-width: 250px;
+            background: #2c2c2c;
+            color: #fff !important;
+            overflow-y: auto;
+        }
+        #potree_sidebar_container,
+        .potree_sidebar,
+        #potree_sidebar_container * {
+            background-color: #2c2c2c;
+            color: #fff;
+        } */
+        
+        /* #potree_render_area {
+            flex: 1 1 0%;
+            min-width: 0;
+            min-height: 0;
+        }
+
+        /* #potree_container {
+            position: absolute;
+            top: 50px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: row;
+        }
+        #potree_render_area {
+            flex: 1 1 0%;
+            min-width: 0;
+            min-height: 0;
+            background: #000;
+            /* z-index: 1; */
+        /* } */
+        /* #potree_sidebar_container {
+            width: 350px;
+            height: 100%; */
+            /* max-width: 480px !important; */
+            /* min-width: 250px !important; */
+            /* background: #2c2c2c; */
+            /* color: #fff; */
+            /* overflow-y: auto; */
+            /* position: relative !important; */
+            /* z-index: 1001; */
+            /* display: block; */
+            /* opacity: 1; */
+            /* pointer-events: auto; */
+        /* } */
+        /* #potree_sidebar_container,
+        .potree_sidebar,
+        #potree_sidebar_container * {
+            color: #fff !important;
+        }
+        #potree_sidebar_container .ui-slider-handle { 
+            background: #fff;
+        }
+        #potree_sidebar_container .ui-state-default { 
+            background: #444;
+            color: #fff;
+        } */
+    </style>
+</head>
+<body>
+
+    <!-- Upload Panel -->
+    <div id="upload_panel">
+        <label>Base (PCD):
+            <input type="file" id="base_file" accept=".pcd" />
+        </label>
+        <label>Gen (PCD):
+            <input type="file" id="gen_file" accept=".pcd" />
+        </label>
+        <button id="btn_compare">Compare</button>
+        <span id="status" style="margin-left:20px;color:#555"></span>
+    </div>
+
+    <!-- Potree Rendering Container -->
+    <!-- <div id="potree_container">
+        <div id="potree_render_area"></div>
+        <div id="potree_sidebar_container"></div>
+    </div>   -->
+
+    <div id="potree_container"></div>
+
+    <script>
+    // ---------- Global ----------
+    let viewer = null;
+    let cloudNodes = [];
+    // const API_COMPARE = "http://0.0.0.0:9000/compare";
+    const API_COMPARE = "/compare";
+
+    // ---------- Initialize Potree ----------
+    function initPotree() {
+        viewer = new Potree.Viewer(document.getElementById("potree_container"));
+        viewer.setEDLEnabled(true);
+        viewer.setFOV(60);
+        viewer.setPointBudget(2_000_000);
+        // viewer.loadSettingsFromURL();
+        viewer.setBackground("gradient");
+        viewer.setDescription("PointCloud Difference Viewer");
+
+        viewer.loadGUI(() => {
+            viewer.setLanguage('en');
+            viewer.toggleSidebar();
+            // $("#menu_appearance").next().show();
+            // $("#menu_tools").next().show();
+            // $("#menu_scene").next().show();
+        });
+        
+        // Camera start position
+        viewer.scene.view.position.set(0, 0, 50);
+        viewer.scene.view.lookAt(new THREE.Vector3(0, 0, 0));
+    }
+
+    // ---------- Clear existing point cloud ----------
+    function clearPotreeScene() {
+        if (cloudNodes.length > 0) {
+            for (const node of cloudNodes) {
+                viewer.scene.removePointCloud(node);
+            }
+        }
+        cloudNodes = [];
+    }
+
+    // ---------- Load LAS on Potree based on URL list from backend ----------
+    function loadAllPointClouds(dirs) {
+        // dirs: { base_dir, gen_dir, extra_base_dir, extra_gen_dir }
+        const configs = [
+            { dir: dirs.base_dir,       name: "Base" },
+            { dir: dirs.gen_dir,        name: "Gen" },
+            { dir: dirs.extra_base_dir, name: "ExtraBase" },
+            { dir: dirs.extra_gen_dir,  name: "ExtraGen" },
+        ];
+
+        
+        const loadedPointClouds = [];
+        configs.forEach(cfg => {
+            if (!cfg.dir) return;
+            const metadataURL = cfg.dir + "/pointclouds/no/metadata.json";
+            Potree.loadPointCloud(metadataURL, cfg.name, e => {
+                let pointcloud = e.pointcloud;
+                let material = pointcloud.material;
+
+                // Use RGB inside LAS to render
+                material.pointSizeType = Potree.PointSizeType.FIXED;
+                material.shape = Potree.PointShape.CIRCLE;
+                material.size = 2.0;
+                material.minSize = 2.0;
+                material.activeAttributeName = "rgba"
+                material.needsUpdate = true;
+
+                viewer.scene.addPointCloud(pointcloud);
+                loadedPointClouds.push(pointcloud);
+
+                // Zoom the camera to point cloud scope after load the last one
+                // if (cfg.name === "ExtraGen") {
+                //     viewer.fitToScreen();
+                // }
+                console.log("Lodaded PC:", loadedPointClouds.length)
+                console.log("Expected Lodaded PC Num:", configs.filter(c => c.dir).length)
+                if (loadedPointClouds.length === configs.filter(c => c.dir).length) {
+                    viewer.fitToScreen();
+                }
+            });
+        });
+    }
+
+    // ---------- Listen click event of button Compare ----------
+    document.getElementById("btn_compare").addEventListener("click", async () => {
+        const baseInp = document.getElementById("base_file");
+        const genInp  = document.getElementById("gen_file");
+        const status  = document.getElementById("status");
+
+        if (!baseInp.files.length || !genInp.files.length) {
+            alert("Please select two PCD files: 'Base' and 'Gen'!");
+            return;
+        }
+
+        status.innerText = "Uploading and comparing, please wait…";
+        const formData = new FormData();
+        formData.append("base_pcd", baseInp.files[0]);
+        formData.append("gen_pcd",  genInp.files[0]);
+        // formData.append("epsilon", 0.02);  // Optional
+
+        try {
+            const resp = await fetch(API_COMPARE, {
+                method: "POST",
+                body: formData
+            });
+            if (!resp.ok) {
+                throw new Error(`Server response: ${resp.status}`);
+            }
+            const result = await resp.json();
+            // Clear the old one
+            clearPotreeScene();
+            // const prefix = "http://0.0.0.0:9000";
+            const prefix = window.location.origin;
+
+            loadAllPointClouds({
+                base_dir:       prefix + result.base_dir,
+                gen_dir:        prefix + result.gen_dir,
+                extra_base_dir: prefix + result.extra_base_dir,
+                extra_gen_dir:  prefix + result.extra_gen_dir
+            });
+
+            status.innerHTML = `
+                Rendering Complete. 
+                Extra Point Number: 
+                    <span style="color: #EE6363; font-weight:bold;">
+                        ${result.extra_gen_num}
+                    </span>
+                , Extra Percentage: 
+                    <span style="color: #333F48; font-weight:bold;">
+                        ${result.extra_percent}
+                    </span>
+            `;
+        }
+        catch (err) {
+            console.error(err);
+            status.innerText = "Manipulation FAILED, please check console or try later.";
+        }
+    });
+
+    // Initialize Potree after load page
+    window.addEventListener("load", () => {
+        initPotree();
+    });
+    </script>
+</body>
+</html>
