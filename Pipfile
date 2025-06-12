@@ -1,0 +1,23 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+fastapi = "*"
+uvicorn = "*"
+gunicorn = "*"
+python-multipart = "*"
+laspy = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"
+python_full_version = "3.10.0"
+fastapi = "==0.95.2"
+uvicorn = "==0.22.0"
+numpy = "==1.25.0"
+open3d = "==0.17.0"
+scikit-learn = "==1.3.0"
+protobuf = "==3.20.3"

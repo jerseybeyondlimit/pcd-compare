@@ -1,0 +1,481 @@
+syntax = "proto2";
+package omnividi.event;
+
+import "inno_box.proto";
+import "header.proto";
+
+enum monitor_code{
+  RUN_FAIL = 0;
+}
+
+message MonitorModuleStat{
+  repeated uint32 code = 1;// ref:monitor_code
+  optional string MODULE_STATUS = 2;
+  optional string WRITING_STATUS = 3;
+}
+
+
+enum cache_code{
+  IMG_SAVE_SUCC = 0;                   // 图片保存成功
+  IMG_DEL_SUCC = 1;                    // 图片删除成功
+  IMG_SAVE_FAIL_MEM_OUT = 2;           // 图片保存失败，由于内存不足
+  IMG_DEL_FAIL_ABSENT = 3;             // 删除失败，由于找不到文件
+  IMG_SAVE_FAIL_PATH_INVALID = 4;      // 图片保存失败，由于路径错误
+  IMG_SAVE_FAIL_URL_ERR = 5;           // 图片保存失败,由于图片URL失效无法下载到本地
+  IMG_SAVE_FAIL_NO_IMG = 6;            // 图片保存失败，没有图片
+  IMG_SAVE_FAIL_NO_DATA = 7;           // 图片保存失败，没有足够的时长的触发事件和当前收到的匹配
+
+  PLATE_SAVE_SUCC = 11;                // 成功找到车牌
+  PLATE_SAVE_FAIL_UNMATCH = 12;        // 找不到车牌，车牌匹配失败
+  PLATE_SAVE_FAIL_NO_DATA = 13;        // 找不到车牌，没有足够的时长的触发事件和当前收到的匹配
+
+  VIDEO_SAVE_SUCC = 21;                // 视频保存成功
+  VIDEO_DEL_SUCC = 22;                 // 视频删除成功
+  VIDEO_SAVE_FAIL_MEM_OUT = 23;        // 视频保存失败，由于内存不足
+  VIDEO_DEL_FAIL_ABSENT = 24;          // 视频删除失败，由于找不到文件
+  VIDEO_SAVE_FAIL_PATH_INVALID = 25;   // 视频保存失败，由于路径错误
+  VIDEO_STREAM_FAIL = 26;              // 视频保存失败,无视频流
+  VIDEO_SAVE_FAIL_NO_DATA = 27;        // 视频保存失败,由于没有足够的时长的视频流数据输入
+  VIDEO_SAVE_FAIL_UNKNOWN_FORMAT = 28; // 视频保存失败,由于视频格式错误
+
+  RECORD_SAVE_SUCC = 41;               // RECORD保存成功
+  RECORD_DEL_SUCC = 42;                // RECORD删除成功
+  RECORD_SAVE_FAIL_MEM_OUT = 43;       // RECORD保存失败，由于内存不足
+  RECORD_DEL_FAIL_ABSENT = 44;         // RECORD删除失败，由于找不到文件
+  RECORD_SAVE_FAIL_PATH_INVALID = 45;  // RECORD保存失败，由于路径错误
+  RECORD_SAVE_FAIL_NO_DATA = 46;       // RECORD保存失败，由于没有足够时长的点云数据输入
+
+  UNKNOWN_CACHE_STATUS = 99;           // 未知类型
+}
+
+
+enum event_type{
+  TRAFFIC_FLOW = 1;        // pic plate
+  TRAFFIC_HAEDWAY = 2;      // not use
+  OVER_SPEED = 3;          // record,video
+  VEHICLE_REVERSAL = 4;     // record,video
+  OVER_SIZE = 5;           // record,video
+  INTRUSION = 6;           // record,video
+  TRAFFIC_QUEUE_LENGTH = 7; // record,video
+}
+
+message EventCacheStat{
+  optional bytes event_id = 1;
+  optional uint32 event_type = 2;       // ref:event_type
+  optional string path = 3;             // reocrd:PointCloudBoxes.00000 ;video:video.mp4 ;photo:plate.jpeg,body.jpeg
+  optional string plate = 4;
+  optional uint32 img_code = 5;         // ref:cache_code
+  optional uint32 video_code = 6;       // ref:cache_code
+  optional uint32 record_code = 7;      // ref:cache_code
+  optional uint32 plate_code = 8;       // ref:cache_code
+}
+
+
+message FlattenMatrixTrigger{
+  optional uint32 lidar_id = 1;
+  optional string  lidar_ip = 2;
+}
+
+message FlattenMatrixTriggerStatus{
+  optional uint32 lidar_id = 1;
+  optional string  lidar_ip = 2;
+  optional bool  status = 3;
+  optional string  exception_detail = 4;
+  repeated float   ground_coefficient = 5 [packed = true];  // ground plane: ax + by + cz + d = 0
+                                                            // [0]:a, [1]:b, [2]:c, [3]:d
+  repeated float   normal_estimate = 6 [packed = true];     // angles(deg) between ground slices' normal and (1,0,0)
+                                                            // [0]:angle between near ground's normal and (1,0,0),
+                                                            // [1]:angle between middle ground's normal and (1,0,0),
+                                                            // [2]:angle between far ground's normal and (1,0,0)
+  repeated float   distance_estimate = 7 [packed = true];   // distances(m) between ground pts and ground plane
+                                                            // [0]:mean of distances, [1]:std of distances
+  optional string flatten_pcd_path =8;
+  repeated TransformMatrix matrix = 9;
+}
+
+
+message AffineMatrixTriggerStatuses{
+  optional uint64 idx = 1 [default = 0];  // index of frame
+  repeated AffineMatrixTriggerStatus statuses = 2;
+}
+
+message AffineMatrixTriggerStatus{
+  optional uint32 status = 1;                  // 0:fail 1:succ
+  optional uint32 region_idx = 2;              // associate with pointcloud for roi region
+  repeated double matrix_44 = 3;               // affine transform matrix for AI coordinate alignment
+  optional string model_name = 4;              // "dyn_center"/"dyn_road"/"dyn_highway"/"dyn_all"
+}
+
+
+enum TransformMatrixType{
+  TRANSFORM_MATRIX_TYPE_PARALLEL = 0;
+  TRANSFORM_MATRIX_TYPE_FUSION = 1;
+  TRANSFORM_MATRIX_TYPE_UNKOWN = 2;
+}
+
+message TransformMatrix {
+  optional omnividi.common.Header header = 1;
+  optional uint64 idx = 2 [default = 0];
+  repeated double transform = 3 [packed = true];
+  optional bool is_identity = 4 [default = false];
+  optional string client_name = 5;
+  optional uint32 matrix_type = 6; // 0 for flatten, 1 for fusion, 2 for to_gps
+}
+
+message FusionMatrixTrigger{
+  optional uint32 lidar_id = 1;
+  optional string lidar_ip = 2;
+  optional string region_idx = 3;
+  optional uint64 apolloid = 4;
+  optional uint64 requestid = 5;
+  optional TransformMatrix matrix = 6;
+};
+
+message FusionMatrixTriggers{
+  repeated FusionMatrixTrigger fusion_matrix_triggers = 1;
+};
+
+message FusionProcessDetail{
+  optional uint32 matched_lidar_id = 1;
+  optional uint32 matched_trajs_num = 2;
+}
+
+message FusionMatrixTriggerFeedback{
+  optional uint32 lidar_id = 1;
+  optional string  lidar_ip = 2;
+  optional uint64 apolloid = 3;
+  optional uint64 requestid = 4;
+  optional bool  status = 5;// true:succ false:fail
+  optional string  exception_detail = 6;
+  optional FusionProcessDetail process_detail = 7;
+  optional string pcd_file_path = 8; // e.g. /apollo/data/calib/xxx.pcd
+  optional TransformMatrix matrix = 9;
+};
+
+message FusionMatrixTriggerFeedbacks{
+ repeated FusionMatrixTriggerFeedback fusion_matrix_trigger_feedback = 1;
+};
+
+message EventRegion {
+  optional string region_name = 1;  // region name
+  optional uint64 frame_id = 2;
+  optional uint64 timestamp = 3;  // in milliesecond
+  optional uint32 lidar_id = 4;
+  optional uint64 region_id = 5;  // region id
+  optional uint32 event_region_attr = 6; // ref: region.proto EventRegionAttribute
+  optional string lane = 7;
+  optional string phase = 8;
+  optional string direction = 9;
+  optional string event_name = 10;
+  optional bool occupancy = 11;
+};
+
+// STOPPED_VEHICLE
+message StoppedVehicleEvent {
+  optional string event_name = 1 [default = "StoppedVehicleEvent"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+// CONGESTION
+message CongestionEvent {
+  optional string event_name = 1 [default = "CongestionEvent"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+}
+
+// WRONG_WAY_DRIVING
+message WrongWayDrivingEvent {
+  optional string event_name = 1 [default = "WrongWayDrivingEvent"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+// BOX_LIST
+/*
+  base on region
+  eg:two regions with the same event type configuration, two BoxListEvent events will be generated
+*/
+message BoxListEvent {
+  repeated EventObjectBox boxes = 1;
+};
+
+// REGION_LIST
+/*
+  based on event
+  eg:two regions with the same event type configuration, the size of regions is 2
+  eg:one region with different event type configurations, two RegionListEvent events will be generated
+*/
+
+message RegionListEvent {
+  repeated EventRegion regions = 1;
+};
+
+// DIMENSION_DETECTION
+message DimensionDetectionFunc {
+  optional string metric_name = 1 [default = "DimensionDetectionFunc"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+  optional float detect_length = 5;
+  optional float detect_width = 6;
+  optional float detect_height = 7;
+};
+
+// LANE_CHANGE
+message LaneChangeEvent {
+  optional string event_name = 1 [default = "LaneChangeEvent"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+  repeated string lane_change_id = 5;
+}
+
+// INTRUSION
+message IntrusionEvent {
+  optional string event_name = 1 [default = "IntrusionEvent"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+// COUNTING_EVENT
+message OccupancyCountFunc {
+  optional string metric_name = 1 [default = "OccupancyCountFunc"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+  optional bool vru_counting_flag = 5;
+};
+
+// FLOW_EVENT
+message VolumeFunc {
+  optional string metric_name = 1 [default = "VolumeFunc"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+// SPEEDING
+message SpeedingEvent {
+  optional string event_name = 1 [default = "SpeedingEvent"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+
+// UNDER_SPEEDING
+message UnderSpeedingEvent {
+  optional string event_name = 1 [default = "UnderSpeedingEvent"];
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+// TIME_MEAN_SPEED
+message TimeMeanSpeedFunc {
+  optional string metric_name = 1;
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+//  EIGHTY_FIVE_PERCENT_SPEED
+message EightyFivePercentSpeedFunc {
+  optional string metric_name = 1;
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+// FIFTEEN_PERCENT_SPEED
+message FifteenPercentSpeedFunc {
+  optional string metric_name = 1;
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+};
+
+// OCCUPANCY_TIME
+message OccupancyTimeFunc {
+  optional string metric_name = 1;
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+  optional uint32 occupancy_status = 5;  // 1: region occupied; 0: region free
+};
+
+// OCCUPANCY_SPACE
+message OccupancySpaceFunc {
+  optional string metric_name = 1;
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+  optional uint32 occupancy_space_ratio = 5;
+};
+
+// DIRECTIONAL_VOLUME
+message DirectionalVolumeFunc {
+  optional string metric_name = 1;
+  optional CommonEvent common_event = 2;
+  optional uint64 region_id = 3;
+  optional bytes event_id = 4;
+  optional uint32 turn_movement = 5;  // 0: STRAIGHT, 1: LEFT_TURN, 2: RIGHT_TURN, 3: U_TURN
+}
+
+message EventObjectBox {
+  optional float x = 1;
+  optional float y = 2;
+  optional float z = 3;
+  optional float length = 4;
+  optional float width = 5;
+  optional float height = 6;
+  optional float speed_kmh = 7;
+  optional uint32 object_type = 8;
+  optional uint64 track_id = 9;
+  optional uint64 timestamp_ns = 10; // smae as timestamp in Box
+  optional uint64 region_id = 11;
+  optional string region_name = 12;
+  optional uint32 lidar_id = 13;
+  optional double lon = 14;
+  optional double lat = 15;
+  optional uint32 pass_time_ms = 16;
+  optional uint32 pass_direction = 17; // 1:enter 2:exit
+  optional uint32 spindle = 18;     // in 0.01 degree
+  optional uint32 north_angle = 19; // in 0.01 degree
+};
+
+message CommonEvent {
+  optional uint64 frame_id = 1;  // idx
+  optional uint64 timestamp_ms = 2;// unix timestamp when event is generated
+  optional uint32 lidar_id = 3;
+  optional uint64 region_id = 4;
+  optional string region_name = 5;
+  optional bytes event_id = 6;
+  optional uint32 status = 7;  // refer to EventTriggerStatus
+  repeated EventObjectBox boxes = 8;
+};
+
+message BaseEvent {
+  optional uint32 event_region_attr = 1;  // ref: region.proto EventRegionAttribute
+  optional bytes serialized_msg = 2;
+}
+
+message BaseEvents {
+  optional omnividi.common.Header header = 1;
+  repeated BaseEvent base_events = 2;
+  optional string apollo_id = 3;
+  repeated omnividi.box.Box boxes = 4;
+  optional uint64 lidar_timestamp = 5;
+}
+
+enum EventTriggerStatus {
+  TRIGGER = 1;
+  ONGOING = 2;
+  END = 3;
+}
+
+
+enum BackgroundOperation{
+  BACKGROUND_MODELING_UNKNOWN = 0;
+  BACKGROUND_MODELING_START = 1;// regenerate
+  BACKGROUND_MODELING_STOP = 2;
+  BACKGROUND_MODELING_EDIT = 3;
+  BACKGROUND_MODELING_CONFIRM = 4;
+  BACKGROUND_MODELING_CANCEL = 5;// delete
+  BACKGROUND_MODELING_UPLOAD = 6;// from web to OD
+  BACKGROUND_MODELING_DOWNLOAD = 7;// from OD to web
+};
+
+
+enum BackgroundReturnStatus{
+  BACKGROUND_MODELING_RETURN_SUCCESS = 1;
+  BACKGROUND_MODELING_RETURN_FAIL = 2;
+};
+
+
+enum BackgroundStaticMapReturnCode{
+  // internal error
+  FAIL_TO_PARSE_PAYLOAD = 301;
+  EMPTY_STATIC_MAP = 302;
+
+
+  // external, illegal operation
+  ILLEGAL_START_TO_EDIT = 401;
+  ILLEGAL_NO_STATIC_MAP = 402;
+  ILLEGAL_STOP = 403;
+  ILLEGAL_CONFIRM = 404;
+
+  // duplicate operation
+  DUPLICATE_START = 501;
+  DUPLICATE_EDIT = 502;
+
+
+};
+
+enum BackgroundType{
+   BACKGROUND_MODELING_STATIC_MAP = 1;
+};
+
+message BackgroundStaticPoint{
+  optional float x = 1 [default = nan];
+  optional float y = 2 [default = nan];
+  optional float z = 3 [default = nan];
+  optional uint32 intensity = 4 [default = 0];
+};
+
+message BackgroundStaticMap{
+    repeated BackgroundStaticPoint points = 1;
+    optional uint32 time_remaining_sec = 2;
+    optional BackgroundStaticMapReturnCode code = 3;
+};
+
+message BackgroundTrigger{
+  optional uint32 lidar_id = 1;
+  optional BackgroundOperation operation = 2;  // BackgroundOperation
+  optional BackgroundType type = 3; // BackgroundType
+  optional bytes payload = 4;
+};
+
+
+
+message BackgroundTriggerReturn{
+  optional uint32 lidar_id = 1;
+  optional BackgroundOperation operation = 2; // BackgroundOperation
+  optional BackgroundType type = 3; // BackgroundType
+  optional BackgroundReturnStatus status = 4;  // BackgroundReturnStatus
+  optional bytes payload = 5;
+}
+
+
+enum EnvironmentEnumType{
+  ENVIRONMENT_TYPE_UNKNOWN = 0;
+  ENVIRONMENT_TYPE_STATIC_MAP = 1;
+  ENVIRONMENT_TYPE_SEMANTIC_MAP = 2;
+  ENVIRONMENT_TYPE_TRAFFIC_MAP = 3;
+};
+
+enum EnvironmentFileOperation{
+  ENVIRONMENT_OPERATION_UNKNOWN = 0;
+  ENVIRONMENT_OPERATION_LOAD = 1;
+  ENVIRONMENT_OPERATION_UNLOAD = 2;
+};
+
+message EnvironmentUpdate{
+  optional string file_path = 1;
+  optional EnvironmentEnumType file_type = 2;
+  optional EnvironmentFileOperation file_operation = 3;
+  optional uint64 time_sig = 4; // monotonic timestamp in 10 sec
+};
+
+message FusionDisplay{
+  optional omnividi.common.Header header = 1;
+  repeated string reader_channels = 2;
+  required string writer_channel = 3;
+  required uint64 connect_id = 4;
+  optional uint32 error_code = 5;
+}

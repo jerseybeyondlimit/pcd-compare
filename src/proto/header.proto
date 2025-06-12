@@ -1,0 +1,7 @@
+syntax = "proto2";
+
+package omnividi.common;
+
+message Header {
+    optional string trace_id = 1;
+}
