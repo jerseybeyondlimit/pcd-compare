@@ -212,9 +212,6 @@
                 loadedPointClouds.push(pointcloud);
 
                 // Zoom the camera to point cloud scope after load the last one
-                // if (cfg.name === "ExtraGen") {
-                //     viewer.fitToScreen();
-                // }
                 console.log("Lodaded PC:", loadedPointClouds.length)
                 console.log("Expected Lodaded PC Num:", configs.filter(c => c.dir).length)
                 if (loadedPointClouds.length === configs.filter(c => c.dir).length) {
