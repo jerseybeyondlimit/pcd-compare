@@ -422,16 +422,17 @@ enum BackgroundType{
 };
 
 message BackgroundStaticPoint{
-  optional float x = 1 [default = nan];
-  optional float y = 2 [default = nan];
-  optional float z = 3 [default = nan];
-  optional uint32 intensity = 4 [default = 0];
+  repeated float x = 1 [packed=true];
+  repeated float y = 2 [packed=true];
+  repeated float z = 3 [packed=true];
+  repeated uint32 intensity = 4 [packed=true];
+  optional uint32 size = 5[default = 0];
 };
 
 message BackgroundStaticMap{
-    repeated BackgroundStaticPoint points = 1;
-    optional uint32 time_remaining_sec = 2;
-    optional BackgroundStaticMapReturnCode code = 3;
+  optional BackgroundStaticPoint points = 1;
+  optional uint32 time_remaining_sec = 2;
+  optional BackgroundStaticMapReturnCode code = 3;
 };
 
 message BackgroundTrigger{

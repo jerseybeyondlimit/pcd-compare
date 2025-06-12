@@ -146,20 +146,31 @@ async def compare_pcd(
     # 2. Deserialize the files into BackgroundStaticMap objects.
     try:
         bsm_base = BackgroundStaticMap()
-        with open(base_path, "rb") as f:
-            bsm_base.ParseFromString(f.read())
+        with open(base_path, "r") as f:
+            read_hex = f.read()
+            raw_binary = bytes.fromhex(read_hex)
+            bsm_base.ParseFromString(raw_binary)
 
         bsm_gen = BackgroundStaticMap()
-        with open(gen_path, "rb") as f:
-            bsm_gen.ParseFromString(f.read())
+        with open(gen_path, "r") as f:
+            read_hex = f.read()
+            raw_binary = bytes.fromhex(read_hex)
+            bsm_gen.ParseFromString(raw_binary)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to deserialize the .pcd file, please verify the file format: {e}")
 
     # 3. Extract the XYZ fields from the Protobuf data and convert them into NumPy arrays, in the order [z, -y, x]. 
     #    Assume each BackgroundStaticPoint has x, y, and z fields.
     try:
-        pts_base = np.array([[pt.z, -pt.y, pt.x] for pt in bsm_base.points], dtype=np.float64)
-        pts_gen = np.array([[pt.z, -pt.y, pt.x] for pt in bsm_gen.points], dtype=np.float64)
+        pts_base_list = []
+        for i in range(bsm_base.points.size):
+            pts_base_list.append([bsm_base.points.z[i], -bsm_base.points.y[i], bsm_base.points.x[i]])
+        pts_base = np.array(pts_base_list, dtype=np.float64)
+
+        pts_gen_list = []
+        for i in range(bsm_gen.points.size):
+            pts_gen_list.append([bsm_gen.points.z[i], -bsm_gen.points.y[i], bsm_gen.points.x[i]])
+        pts_gen = np.array(pts_gen_list, dtype=np.float64)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extracting points from Protobuf failed: {e}")
 
@@ -305,10 +316,16 @@ async def compare_pcd(
         return f"/static/processed/{output_dir_name}"
 
     try:
-        base_octree_url = convert_one(las_base_path, fn_base.split(".")[0])
-        gen_octree_url = convert_one(las_gen_path, fn_gen.split(".")[0])
-        extra_base_octree_url = convert_one(las_extra_base_path, fn_extra_base.split(".")[0])
-        extra_gen_octree_url = convert_one(las_extra_gen_path, fn_extra_gen.split(".")[0])
+        def maybe_convert(pts: np.ndarray, las_path: str, prefix: str):
+            if pts.shape[0] > 0:
+                return convert_one(las_path, prefix)
+            else:
+                return ""
+        
+        base_octree_url = maybe_convert(pts_base_non_extra, las_base_path, fn_base.split(".")[0])
+        gen_octree_url = maybe_convert(pts_gen_non_extra, las_gen_path, fn_gen.split(".")[0])
+        extra_base_octree_url = maybe_convert(extra_pts_base, las_extra_base_path, fn_extra_base.split(".")[0])
+        extra_gen_octree_url = maybe_convert(extra_pts_gen, las_extra_gen_path, fn_extra_gen.split(".")[0])
     except HTTPException:
         raise
     except Exception as e:
